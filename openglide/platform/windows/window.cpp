@@ -307,22 +307,6 @@ bool InitialiseOpenGLWindow(FxU wnd, int x, int y, int width, int height)
     hRC = wglCreateContext( hDC );
     wglMakeCurrent( hDC, hRC );
 
-    if (UserConfig.QEmu) {
-        BOOL (WINAPI *SwapIntervalEXT)(int) = (BOOL (WINAPI *)(int))
-            wglGetProcAddress("wglSwapIntervalEXT");
-        int (WINAPI *GetSwapIntervalEXT)(void) = (int (WINAPI *)(void))
-            wglGetProcAddress("wglGetSwapIntervalEXT");
-        if (GetSwapIntervalEXT && SwapIntervalEXT) {
-            if (UserConfig.VsyncOff) {
-                if (GetSwapIntervalEXT())
-                    SwapIntervalEXT(0);
-            }
-            else if (UserConfig.OverrideSync &&
-                    (UserConfig.OverrideSync != GetSwapIntervalEXT()))
-                SwapIntervalEXT(UserConfig.OverrideSync & 0x03U);
-        }
-    }
-
     if (UserConfig.FramebufferSRGB)
         glEnable(GL_FRAMEBUFFER_SRGB);
 
@@ -341,6 +325,7 @@ void FinaliseOpenGLWindow( void)
 {
     if ( ramp_stored )
         SetGammaTable(&old_ramp);
+    SetSwapInterval(-1);
 
     wglMakeCurrent( NULL, NULL );
     wglDeleteContext( hRC );
@@ -434,6 +419,18 @@ bool SetScreenMode(int &xsize, int &ysize)
 void ResetScreenMode()
 {
     ChangeDisplaySettings( NULL, 0 );
+}
+
+void SetSwapInterval(const int i)
+{
+    static int last_i = -1;
+    BOOL (WINAPI *SwapIntervalEXT)(int) = (BOOL (WINAPI *)(int))
+        wglGetProcAddress("wglSwapIntervalEXT");
+    if (SwapIntervalEXT && (last_i != i)) {
+        last_i = i;
+        if (i >= 0)
+            SwapIntervalEXT(i);
+    }
 }
 
 void SwapBuffers()
