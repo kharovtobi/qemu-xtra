@@ -13,7 +13,11 @@
 #ifndef __GLEXTENSIONS__
 #define __GLEXTENSIONS__
 
+#ifdef C_USE_SDL
+#include "SDL_opengl_glext.h"
+#else
 #include <GL/glext.h>
+#endif
 
 void ValidateUserConfig();
 

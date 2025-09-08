@@ -53,6 +53,21 @@ static const char               *xstr;
 static std::vector<unsigned short> gammaRamp;
 static std::vector<XColor>         xcolors;
 
+static int syncFBConfigToPFD(Display *dpy, const GLXFBConfig *fbc, const int nElem)
+{
+    int ret = 0, colorBits;
+    for (int i = 0; i < nElem; i++) {
+        glXGetFBConfigAttrib(dpy, fbc[i], GLX_BUFFER_SIZE, &colorBits);
+        XVisualInfo *vinfo = glXGetVisualFromFBConfig(dpy, fbc[i]);
+        if (vinfo->depth == colorBits)
+            ret = i;
+        XFree(vinfo);
+        if (ret)
+            break;
+    }
+    return ret;
+}
+
 static int *iattribs_fb(Display *dpy, const int do_msaa)
 {
     static int ia[] = {
@@ -62,25 +77,15 @@ static int *iattribs_fb(Display *dpy, const int do_msaa)
         GLX_X_VISUAL_TYPE   , GLX_TRUE_COLOR,
         GLX_BUFFER_SIZE     , 32,
         GLX_DEPTH_SIZE      , 24,
+        GLX_ALPHA_SIZE      , 8,
         GLX_STENCIL_SIZE    , 8,
         GLX_DOUBLEBUFFER    , True,
         GLX_SAMPLE_BUFFERS  , 0,
         GLX_SAMPLES         , 0,
         None
     };
-
-    int nElem, cBufsz = 0;
-    GLXFBConfig *currFB = glXGetFBConfigs(dpy, DefaultScreen(dpy), &nElem);
-    if (currFB && nElem) {
-        glXGetFBConfigAttrib(dpy, currFB[0], GLX_BUFFER_SIZE, &cBufsz);
-        XFree(currFB);
-    }
-
     for (int i = 0; ia[i]; i+=2) {
         switch(ia[i]) {
-            case GLX_BUFFER_SIZE:
-                ia[i+1] = (cBufsz >= 24)? cBufsz:ia[i+1];
-                break;
             case GLX_SAMPLE_BUFFERS:
                 ia[i+1] = (do_msaa)? 1:0;
                 break;
@@ -154,7 +159,7 @@ bool InitialiseOpenGLWindow(FxU wnd, int x, int y, int width, int height)
 
         if (glXChooseFBConfig && glXGetVisualFromFBConfig)
         {
-            int fbattr, elements, *attrib = iattribs_fb(dpy, UserConfig.SamplesMSAA);
+            int fbid, elements, *attrib = iattribs_fb(dpy, UserConfig.SamplesMSAA);
             GLXFBConfig *fbc = glXChooseFBConfig(dpy, DefaultScreen(dpy), attrib, &elements);
             if (UserConfig.SamplesMSAA && !fbc && !elements) {
                 attrib = iattribs_fb(dpy, 0);
@@ -163,25 +168,29 @@ bool InitialiseOpenGLWindow(FxU wnd, int x, int y, int width, int height)
             if (fbc && elements)
             {
                 static const char *swapMethod[] = {
-                    "swapNone", "swapXChg", "swapCpy", "swapUndef"
+                    "swapNone", "swapXchg", "swapCopy", "swapUndef"
                 };
-                int swapattr = 0;
-                int nAux, nSamples[2];
+                const char *xsstr = xstr;
+                int swapAttrib = GLX_SWAP_UNDEFINED_OML;
+                int i, nAux, nSamples[2];
                 has_sRGB = UserConfig.FramebufferSRGB;
+                xstr = glXQueryServerString(dpy, scrnum, GLX_EXTENSIONS);
+                i = syncFBConfigToPFD(dpy, fbc, elements);
                 if (find_xstr(xstr, "GLX_OML_swap_method"))
-                    glXGetFBConfigAttrib(dpy, *fbc, GLX_SWAP_METHOD_OML, &swapattr);
-                glXGetFBConfigAttrib(dpy, *fbc, GLX_FBCONFIG_ID, &fbattr);
-                glXGetFBConfigAttrib(dpy, *fbc, GLX_AUX_BUFFERS, &nAux);
-                glXGetFBConfigAttrib(dpy, *fbc, GLX_SAMPLE_BUFFERS, &nSamples[0]);
-                glXGetFBConfigAttrib(dpy, *fbc, GLX_SAMPLES, &nSamples[1]);
-                visinfo = glXGetVisualFromFBConfig(dpy, *fbc);
+                    glXGetFBConfigAttrib(dpy, fbc[i], GLX_SWAP_METHOD_OML, &swapAttrib);
+                glXGetFBConfigAttrib(dpy, fbc[i], GLX_FBCONFIG_ID, &fbid);
+                glXGetFBConfigAttrib(dpy, fbc[i], GLX_AUX_BUFFERS, &nAux);
+                glXGetFBConfigAttrib(dpy, fbc[i], GLX_SAMPLE_BUFFERS, &nSamples[0]);
+                glXGetFBConfigAttrib(dpy, fbc[i], GLX_SAMPLES, &nSamples[1]);
+                visinfo = glXGetVisualFromFBConfig(dpy, fbc[i]);
                 XFree(fbc);
                 if (visinfo) {
-                    buffer_method = (swapattr == GLX_SWAP_COPY_OML)? bmCopy:bmExchange;
+                    buffer_method = (swapAttrib == GLX_SWAP_COPY_OML)? bmCopy:bmExchange;
                     fprintf(stderr, "Info: FBConfig id 0x%03x visual 0x%03lx %s nAux %d nSamples %d %d %s\n",
-                        fbattr, visinfo->visualid, swapMethod[(swapattr & 0x3)],
+                        fbid, visinfo->visualid, swapMethod[(swapAttrib & 0x3)],
                         nAux, nSamples[0], nSamples[1], (has_sRGB)? "sRGB":"");
                 }
+                xstr = xsstr;
             }
             else
                 fprintf(stderr, "Warn: %s\n", "Fallback to glXChooseVisual()");
